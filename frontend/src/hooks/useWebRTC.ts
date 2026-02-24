@@ -30,6 +30,12 @@ export function useWebRTC(roomId: string, userName: string) {
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [error, setError] = useState<string>("");
 
+    // Waiting Room State
+    const [isWaiting, setIsWaiting] = useState<boolean>(false);
+    const [isHost, setIsHost] = useState<boolean>(false);
+    const [joinRequests, setJoinRequests] = useState<{ socketId: string, userId: string, userName: string }[]>([]);
+    const [isJoined, setIsJoined] = useState<boolean>(false);
+
     const socketRef = useRef<Socket | null>(null);
     const peersRef = useRef<{ [socketId: string]: RTCPeerConnection }>({});
     const userIdRef = useRef<string>(Math.random().toString(36).substring(2, 9));
@@ -115,9 +121,38 @@ export function useWebRTC(roomId: string, userName: string) {
                     socketRef.current = io(SOCKET_URL);
                 }
 
+                // -- WAITING ROOM LOGIC START --
                 socketRef.current.on("connect", () => {
-                    socketRef.current?.emit("join-room", roomId, userIdRef.current, userName);
+                    // Instead of joining immediately, request to join
+                    socketRef.current?.emit("request-join", roomId, userIdRef.current, userName);
                 });
+
+                socketRef.current.on("join-approved", (approvedRoomId, approvedUserId, approvedUserName, hostStatus) => {
+                    setIsWaiting(false);
+                    setIsJoined(true);
+                    setIsHost(hostStatus);
+                    // Now safely join the room and mount video
+                    socketRef.current?.emit("join-room", approvedRoomId, approvedUserId, approvedUserName);
+                });
+
+                socketRef.current.on("waiting-for-approval", () => {
+                    setIsWaiting(true);
+                });
+
+                socketRef.current.on("join-rejected", (reason) => {
+                    setIsWaiting(false);
+                    setError(reason || "Your request to join was declined.");
+                });
+
+                // Host events
+                socketRef.current.on("join-request-received", (request: { socketId: string, userId: string, userName: string }) => {
+                    setJoinRequests(prev => [...prev, request]);
+                });
+
+                socketRef.current.on("you-are-host", () => {
+                    setIsHost(true);
+                });
+                // -- WAITING ROOM LOGIC END --
 
                 socketRef.current.on("room-participants", (participants: any[]) => {
                     participants.forEach(p => {
@@ -246,6 +281,11 @@ export function useWebRTC(roomId: string, userName: string) {
         socketRef.current.emit("chat-message", { roomId, ...msgPayload });
     };
 
+    const respondToJoinRequest = (targetSocketId: string, approved: boolean) => {
+        socketRef.current?.emit("resolve-join-request", targetSocketId, approved);
+        setJoinRequests(prev => prev.filter(req => req.socketId !== targetSocketId));
+    };
+
     const shareScreen = async (onStop?: () => void) => {
         try {
             const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
@@ -326,6 +366,11 @@ export function useWebRTC(roomId: string, userName: string) {
         stopScreenShare,
         toggleAudio,
         toggleVideo,
-        error
+        error,
+        isWaiting,
+        isHost,
+        joinRequests,
+        isJoined,
+        respondToJoinRequest
     };
 }

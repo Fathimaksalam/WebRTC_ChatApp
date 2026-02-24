@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Mic, MicOff, Video, VideoOff, MonitorUp, PhoneOff, MessageSquare, Send } from "lucide-react";
+import { Mic, MicOff, Video, VideoOff, MonitorUp, PhoneOff, MessageSquare, Send, Link, Check, X } from "lucide-react";
 import styles from "./page.module.css";
 import { useWebRTC } from "@/hooks/useWebRTC";
 import VideoPlayer from "@/components/VideoPlayer";
@@ -18,6 +18,7 @@ export default function Room() {
     const [isMuted, setIsMuted] = useState(false);
     const [isVideoOff, setIsVideoOff] = useState(false);
     const [isScreenSharing, setIsScreenSharing] = useState(false);
+    const [linkCopied, setLinkCopied] = useState(false);
 
     useEffect(() => {
         const name = localStorage.getItem("aether_username");
@@ -37,7 +38,12 @@ export default function Room() {
         stopScreenShare,
         toggleAudio,
         toggleVideo,
-        error
+        error,
+        isWaiting,
+        isHost,
+        joinRequests,
+        isJoined,
+        respondToJoinRequest
     } = useWebRTC(id, userName || "Guest");
 
     // Scroll to bottom of chat
@@ -71,6 +77,13 @@ export default function Room() {
         window.location.href = "/";
     };
 
+    const handleCopyLink = () => {
+        const url = `${window.location.origin}/room/${id}`;
+        navigator.clipboard.writeText(url);
+        setLinkCopied(true);
+        setTimeout(() => setLinkCopied(false), 2000);
+    };
+
     const handleSendMessage = (e: React.FormEvent) => {
         e.preventDefault();
         if (chatInput.trim()) {
@@ -81,6 +94,35 @@ export default function Room() {
 
     return (
         <div className={styles.container}>
+            {/* Waiting Room Screen */}
+            {isWaiting && !isJoined && (
+                <div className={styles.waitingOverlay}>
+                    <div className={styles.waitingCard}>
+                        <div className={styles.waitingSpinner}></div>
+                        <h2>Asking to join...</h2>
+                        <p>You will join the meeting when the host lets you in.</p>
+                        <button className="btn btn-secondary" onClick={handleLeave} style={{ marginTop: 24 }}>
+                            Leave
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* Host Join Requests Toast */}
+            {isHost && joinRequests.length > 0 && (
+                <div className={styles.hostToasts}>
+                    {joinRequests.map(req => (
+                        <div key={req.socketId} className={styles.toastCard}>
+                            <p><strong>{req.userName}</strong> wants to join this meeting.</p>
+                            <div className={styles.toastActions}>
+                                <button className={styles.toastBtnDeny} onClick={() => respondToJoinRequest(req.socketId, false)}>Deny</button>
+                                <button className={styles.toastBtnAdmit} onClick={() => respondToJoinRequest(req.socketId, true)}>Admit</button>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+
             {/* Header */}
             <header className={styles.header}>
                 <div className={styles.logoInfo}>
@@ -88,9 +130,13 @@ export default function Room() {
                     <h2>Aether</h2>
                 </div>
                 <div className={styles.roomInfo}>
-                    <span className={styles.roomBadge}>Room: {id}</span>
+                    <button className={styles.roomBadge} onClick={handleCopyLink} title="Copy Meeting Link">
+                        {linkCopied ? <Check size={14} /> : <Link size={14} />}
+                        {linkCopied ? "Copied Link!" : `Room: ${id}`}
+                    </button>
                 </div>
                 <div className={styles.userInfo}>
+                    {isHost && <span className={styles.hostBadge}>Host</span>}
                     {userName}
                 </div>
             </header>
@@ -139,15 +185,20 @@ export default function Room() {
                     </div>
                     <div className={styles.chatMessages}>
                         <div className={styles.systemMessage}>Welcome to the room, {userName}!</div>
-                        {messages.map((msg) => (
-                            <div key={msg.id} className={`${styles.chatBubble} ${msg.senderName === userName ? styles.chatBubbleSelf : ""}`}>
-                                <div className={styles.chatSender}>{msg.senderName === userName ? "You" : msg.senderName}</div>
-                                <div className={styles.chatText}>{msg.message}</div>
-                                <div className={styles.chatTime}>
-                                    {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        {messages.map((msg) => {
+                            const isMine = msg.senderName === userName;
+                            return (
+                                <div key={msg.id} className={`${styles.chatBubbleWrapper} ${isMine ? styles.chatBubbleWrapperSelf : ""}`}>
+                                    {!isMine && <div className={styles.chatSender}>{msg.senderName}</div>}
+                                    <div className={`${styles.chatBubble} ${isMine ? styles.chatBubbleSelf : styles.chatBubbleOther}`}>
+                                        <div className={styles.chatText}>{msg.message}</div>
+                                        <div className={styles.chatTime}>
+                                            {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                        </div>
+                                    </div>
                                 </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                         <div ref={chatEndRef} />
                     </div>
                     <form className={styles.chatInputArea} onSubmit={handleSendMessage}>
