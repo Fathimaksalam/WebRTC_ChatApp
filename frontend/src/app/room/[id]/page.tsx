@@ -2,15 +2,23 @@
 
 import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Mic, MicOff, Video, VideoOff, MonitorUp, PhoneOff, MessageSquare, Send, Link, Check, X } from "lucide-react";
+import { Mic, MicOff, Video as VideoIcon, VideoOff, MonitorUp, PhoneOff, MessageSquare, Send, Link, Check, Moon, Sun, Hand, SmilePlus } from "lucide-react";
 import styles from "./page.module.css";
 import { useWebRTC } from "@/hooks/useWebRTC";
 import VideoPlayer from "@/components/VideoPlayer";
+import { useTheme } from "@/context/ThemeContext";
+
+const EMOJIS = ["👍", "❤️", "😂", "👏", "🎉", "😮"];
 
 export default function Room() {
     const { id } = useParams() as { id: string };
     const router = useRouter();
+    const { theme, toggleTheme } = useTheme();
+
     const [userName, setUserName] = useState("");
+    const [namePrompt, setNamePrompt] = useState("");
+    const [needsName, setNeedsName] = useState(false);
+
     const [isChatOpen, setIsChatOpen] = useState(false);
     const [chatInput, setChatInput] = useState("");
     const chatEndRef = useRef<HTMLDivElement>(null);
@@ -20,41 +28,70 @@ export default function Room() {
     const [isScreenSharing, setIsScreenSharing] = useState(false);
     const [linkCopied, setLinkCopied] = useState(false);
 
+    // Interactions State
+    const [isHandRaised, setIsHandRaised] = useState(false);
+    const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+
     useEffect(() => {
-        const name = localStorage.getItem("aether_username");
+        const name = localStorage.getItem("syncmeet_username");
         if (!name) {
-            router.push("/");
+            setNeedsName(true);
         } else {
             setUserName(name);
         }
-    }, [router]);
+    }, []);
+
+    const handleNameSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (namePrompt.trim()) {
+            localStorage.setItem("syncmeet_username", namePrompt.trim());
+            setUserName(namePrompt.trim());
+            setNeedsName(false);
+        }
+    };
 
     const {
-        localStream,
-        peers,
-        messages,
-        sendMessage,
-        shareScreen,
-        stopScreenShare,
-        toggleAudio,
-        toggleVideo,
-        error,
-        isWaiting,
-        isHost,
-        joinRequests,
-        isJoined,
-        respondToJoinRequest
+        localStream, peers, messages, sendMessage, shareScreen,
+        stopScreenShare, toggleAudio, toggleVideo, error, isWaiting,
+        isHost, joinRequests, isJoined, respondToJoinRequest,
+        reactions, raisedHands, sendReaction, toggleHand
     } = useWebRTC(id, userName || "Guest");
 
-    // Scroll to bottom of chat
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [messages, isChatOpen]);
 
-    if (!userName) return null; // Wait for username to load
+    if (needsName) {
+        return (
+            <div className={styles.container}>
+                <div className={styles.namePromptOverlay}>
+                    <form onSubmit={handleNameSubmit} className={`glass-panel ${styles.namePromptCard}`} style={{ maxWidth: 400, padding: 32, borderRadius: 16 }}>
+                        <h2 style={{ marginBottom: 8, fontSize: '1.5rem', color: 'var(--text-primary)' }}>Join Meeting</h2>
+                        <p style={{ color: 'var(--text-secondary)', marginBottom: 24 }}>Please enter your display name to join the call.</p>
+
+                        <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8, display: 'block' }}>YOUR NAME</label>
+                        <input
+                            type="text"
+                            className={styles.chatInputNeo}
+                            style={{ width: '100%', padding: '14px 20px', borderRadius: 10, background: 'rgba(0,0,0,0.2)', color: 'white', border: '1px solid rgba(255,255,255,0.1)' }}
+                            placeholder="e.g. Alex"
+                            value={namePrompt}
+                            onChange={e => setNamePrompt(e.target.value)}
+                            autoFocus
+                        />
+                        <button type="submit" className={`btn btn-primary`} style={{ marginTop: 24, width: '100%' }} disabled={!namePrompt.trim()}>
+                            Join Meeting
+                        </button>
+                    </form>
+                </div>
+            </div>
+        );
+    }
+
+    if (!userName) return null;
 
     const handleToggleMute = () => {
-        toggleAudio(isMuted); // If currently muted (true), we want to enable audio
+        toggleAudio(isMuted);
         setIsMuted(!isMuted);
     };
 
@@ -71,6 +108,16 @@ export default function Room() {
             const success = await shareScreen(() => setIsScreenSharing(false));
             if (success) setIsScreenSharing(true);
         }
+    };
+
+    const handleToggleHand = () => {
+        setIsHandRaised(!isHandRaised);
+        toggleHand();
+    };
+
+    const handleSendReaction = (emoji: string) => {
+        sendReaction(emoji);
+        setShowEmojiPicker(false);
     };
 
     const handleLeave = () => {
@@ -92,9 +139,23 @@ export default function Room() {
         }
     };
 
+    const renderReactions = (targetSocketId: string | 'local') => {
+        const peerIds = peers.map(p => p.socketId);
+        const userReactions = reactions.filter(r => {
+            if (targetSocketId === 'local') return !peerIds.includes(r.socketId);
+            return r.socketId === targetSocketId;
+        });
+
+        return userReactions.map(r => (
+            <div key={r.id} className={styles.floatingReaction}>
+                {r.emoji}
+            </div>
+        ));
+    };
+
     return (
         <div className={styles.container}>
-            {/* Waiting Room Screen */}
+            {/* Waiting Room */}
             {isWaiting && !isJoined && (
                 <div className={styles.waitingOverlay}>
                     <div className={styles.waitingCard}>
@@ -126,52 +187,56 @@ export default function Room() {
             {/* Header */}
             <header className={styles.header}>
                 <div className={styles.logoInfo}>
-                    <div className={styles.logoIcon}><Video size={20} /></div>
-                    <h2>Aether</h2>
+                    <div className={styles.logoCircles} style={{ position: 'relative', width: 28, height: 28, marginRight: 8 }}>
+                        <div style={{ position: 'absolute', width: 20, height: 20, borderRadius: '50%', background: '#3b82f6', top: 0, right: 0 }}></div>
+                        <div style={{ position: 'absolute', width: 20, height: 20, borderRadius: '50%', background: '#8b5cf6', bottom: 0, left: 0, mixBlendMode: 'screen' }}></div>
+                    </div>
+                    <h2>SyncMeet</h2>
                 </div>
-                <div className={styles.roomInfo}>
+
+                <div className={styles.headerActions}>
                     <button className={styles.roomBadge} onClick={handleCopyLink} title="Copy Meeting Link">
                         {linkCopied ? <Check size={14} /> : <Link size={14} />}
-                        {linkCopied ? "Copied Link!" : `Room: ${id}`}
+                        {linkCopied ? "Copied Link!" : `Room ID: ${id}`}
                     </button>
-                </div>
-                <div className={styles.userInfo}>
-                    {isHost && <span className={styles.hostBadge}>Host</span>}
-                    {userName}
+                    <button className={styles.themeToggleNav} onClick={toggleTheme}>
+                        {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+                    </button>
                 </div>
             </header>
 
             {/* Main Content */}
             <div className={styles.mainContent}>
-                {/* Error Banner */}
                 {error && (
-                    <div style={{ position: "absolute", top: 10, left: "50%", transform: "translateX(-50%)", background: "var(--danger)", padding: "10px 20px", borderRadius: 8, zIndex: 50 }}>
-                        {error}
-                    </div>
+                    <div className={styles.errorBanner}>{error}</div>
                 )}
 
-                {/* Video Grid Area */}
                 <div className={`${styles.videoGridContainer} ${isChatOpen ? styles.shrink : ""}`}>
                     <div className={styles.videoGrid}>
-
                         {/* Local Video */}
-                        <VideoPlayer
-                            stream={isVideoOff ? null : localStream}
-                            userName={userName}
-                            isLocal={true}
-                            isMuted={isMuted}
-                        />
+                        <div className={styles.videoContainerWrapper}>
+                            <VideoPlayer
+                                stream={isVideoOff ? null : localStream}
+                                userName={userName}
+                                isLocal={true}
+                                isMuted={isMuted}
+                            />
+                            {isHandRaised && <div className={styles.handIndicator}><Hand size={20} color="#eab308" /></div>}
+                            {renderReactions('local')}
+                        </div>
 
                         {/* Remote Peers */}
                         {peers.map((peer) => (
-                            <VideoPlayer
-                                key={peer.socketId}
-                                stream={peer.stream}
-                                userName={peer.userName}
-                                isLocal={false}
-                            />
+                            <div key={peer.socketId} className={styles.videoContainerWrapper}>
+                                <VideoPlayer
+                                    stream={peer.stream}
+                                    userName={peer.userName}
+                                    isLocal={false}
+                                />
+                                {raisedHands.includes(peer.socketId) && <div className={styles.handIndicator}><Hand size={20} color="#eab308" /></div>}
+                                {renderReactions(peer.socketId)}
+                            </div>
                         ))}
-
                     </div>
                 </div>
 
@@ -184,7 +249,7 @@ export default function Room() {
                         </button>
                     </div>
                     <div className={styles.chatMessages}>
-                        <div className={styles.systemMessage}>Welcome to the room, {userName}!</div>
+                        <div className={styles.systemMessage}>Secure, peer-to-peer chat started.</div>
                         {messages.map((msg) => {
                             const isMine = msg.senderName === userName;
                             return (
@@ -204,12 +269,12 @@ export default function Room() {
                     <form className={styles.chatInputArea} onSubmit={handleSendMessage}>
                         <input
                             type="text"
-                            placeholder="Send a message..."
-                            className="input-field"
+                            placeholder="Type a message..."
+                            className={styles.chatInputNeo}
                             value={chatInput}
                             onChange={(e) => setChatInput(e.target.value)}
                         />
-                        <button type="submit" className={`btn-icon ${styles.sendBtn}`}>
+                        <button type="submit" className={styles.sendNeoBtn}>
                             <Send size={18} />
                         </button>
                     </form>
@@ -219,6 +284,12 @@ export default function Room() {
             {/* Controls Bar */}
             <footer className={styles.controlsBar}>
                 <div className={styles.controlsGroup}>
+                    {/* Time or custom subtle UI could go here */}
+                    {isHost && <span className={styles.hostBadgeNeo}>Host</span>}
+                    <span className={styles.userNameNeo}>{userName}</span>
+                </div>
+
+                <div className={styles.centerControls}>
                     <button
                         className={`btn-icon ${isMuted ? "inactive" : ""}`}
                         onClick={handleToggleMute}
@@ -232,7 +303,7 @@ export default function Room() {
                         onClick={handleToggleVideo}
                         title={isVideoOff ? "Start Camera" : "Stop Camera"}
                     >
-                        {isVideoOff ? <VideoOff size={22} /> : <Video size={22} />}
+                        {isVideoOff ? <VideoOff size={22} /> : <VideoIcon size={22} />}
                     </button>
 
                     <button
@@ -242,14 +313,38 @@ export default function Room() {
                     >
                         <MonitorUp size={22} />
                     </button>
+
+                    <div className={styles.reactionWrapper}>
+                        <button
+                            className={`btn-icon`}
+                            onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                            title="React"
+                        >
+                            <SmilePlus size={22} />
+                        </button>
+                        {showEmojiPicker && (
+                            <div className={styles.emojiPicker}>
+                                {EMOJIS.map(e => (
+                                    <button key={e} onClick={() => handleSendReaction(e)} className={styles.emojiBtn}>{e}</button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    <button
+                        className={`btn-icon ${isHandRaised ? "activeWarning" : ""}`}
+                        onClick={handleToggleHand}
+                        title="Raise Hand"
+                    >
+                        <Hand size={22} />
+                    </button>
+
+                    <button className={`btn btn-danger ${styles.leaveBtnNeo}`} onClick={handleLeave}>
+                        <PhoneOff size={20} />
+                    </button>
                 </div>
 
-                <button className={`btn btn-danger ${styles.leaveBtn}`} onClick={handleLeave}>
-                    <PhoneOff size={20} />
-                    <span>Leave Room</span>
-                </button>
-
-                <div className={styles.controlsGroup}>
+                <div className={styles.controlsGroup} style={{ justifyContent: 'flex-end' }}>
                     <button
                         className={`btn-icon ${isChatOpen ? "active" : ""}`}
                         onClick={() => setIsChatOpen(!isChatOpen)}

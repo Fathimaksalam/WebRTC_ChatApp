@@ -36,6 +36,10 @@ export function useWebRTC(roomId: string, userName: string) {
     const [joinRequests, setJoinRequests] = useState<{ socketId: string, userId: string, userName: string }[]>([]);
     const [isJoined, setIsJoined] = useState<boolean>(false);
 
+    // Engagement State
+    const [reactions, setReactions] = useState<{ id: string, socketId: string, emoji: string }[]>([]);
+    const [raisedHands, setRaisedHands] = useState<string[]>([]); // Array of socketIds
+
     const socketRef = useRef<Socket | null>(null);
     const peersRef = useRef<{ [socketId: string]: RTCPeerConnection }>({});
     const userIdRef = useRef<string>(Math.random().toString(36).substring(2, 9));
@@ -108,6 +112,9 @@ export function useWebRTC(roomId: string, userName: string) {
             }
         };
 
+        // Do not connect if userName is missing (e.g. prompt is showing)
+        if (!userName) return;
+
         getMedia()
             .then((stream) => {
                 if (isStopped) {
@@ -123,8 +130,11 @@ export function useWebRTC(roomId: string, userName: string) {
 
                 // -- WAITING ROOM LOGIC START --
                 socketRef.current.on("connect", () => {
-                    // Instead of joining immediately, request to join
-                    socketRef.current?.emit("request-join", roomId, userIdRef.current, userName);
+                    const owned = JSON.parse(localStorage.getItem("syncmeet_owned_rooms") || "[]");
+                    const isClaimingHost = owned.includes(roomId);
+
+                    // Instead of joining immediately, request to join with host token
+                    socketRef.current?.emit("request-join", roomId, userIdRef.current, userName, isClaimingHost);
                 });
 
                 socketRef.current.on("join-approved", (approvedRoomId, approvedUserId, approvedUserName, hostStatus) => {
@@ -136,6 +146,10 @@ export function useWebRTC(roomId: string, userName: string) {
                 });
 
                 socketRef.current.on("waiting-for-approval", () => {
+                    setIsWaiting(true);
+                });
+
+                socketRef.current.on("waiting-for-host", () => {
                     setIsWaiting(true);
                 });
 
@@ -253,6 +267,25 @@ export function useWebRTC(roomId: string, userName: string) {
                 socketRef.current.on("chat-message", (payload: ChatMessage) => {
                     setMessages(prev => [...prev, payload]);
                 });
+
+                socketRef.current.on("peer-reaction", (payload: { socketId: string, emoji: string }) => {
+                    const reactionId = Math.random().toString(36).substring(2, 9);
+                    setReactions(prev => [...prev, { id: reactionId, socketId: payload.socketId, emoji: payload.emoji }]);
+                    setTimeout(() => {
+                        setReactions(prev => prev.filter(r => r.id !== reactionId));
+                    }, 4000); // Remove reaction after 4s
+                });
+
+                socketRef.current.on("peer-hand-toggled", (payload: { socketId: string, isRaised: boolean }) => {
+                    setRaisedHands(prev => {
+                        if (payload.isRaised) {
+                            if (!prev.includes(payload.socketId)) return [...prev, payload.socketId];
+                            return prev;
+                        } else {
+                            return prev.filter(id => id !== payload.socketId);
+                        }
+                    });
+                });
             })
             .catch((err) => {
                 console.error("Critical error in WebRTC setup:", err);
@@ -357,6 +390,30 @@ export function useWebRTC(roomId: string, userName: string) {
         }
     };
 
+    const sendReaction = (emoji: string) => {
+        if (!socketRef.current?.id) return;
+        const myId = socketRef.current.id as string;
+        socketRef.current.emit("send-reaction", { roomId, socketId: myId, emoji });
+
+        // Also trigger locally so the sender sees their own reaction instantly
+        const reactionId = Math.random().toString(36).substring(2, 9);
+        setReactions(prev => [...prev, { id: reactionId, socketId: myId, emoji }]);
+        setTimeout(() => {
+            setReactions(prev => prev.filter(r => r.id !== reactionId));
+        }, 4000);
+    };
+
+    const toggleHand = () => {
+        if (!socketRef.current?.id) return;
+        const myId = socketRef.current.id as string;
+        setRaisedHands(prev => {
+            const isRaised = !prev.includes(myId);
+            socketRef.current?.emit("toggle-hand", { roomId, socketId: myId, isRaised });
+            if (isRaised) return [...prev, myId];
+            return prev.filter(id => id !== myId);
+        });
+    };
+
     return {
         localStream,
         peers,
@@ -371,6 +428,10 @@ export function useWebRTC(roomId: string, userName: string) {
         isHost,
         joinRequests,
         isJoined,
-        respondToJoinRequest
+        respondToJoinRequest,
+        reactions,
+        raisedHands,
+        sendReaction,
+        toggleHand
     };
 }
