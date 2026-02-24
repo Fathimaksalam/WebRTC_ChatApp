@@ -28,13 +28,24 @@ io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
   // 1. Initial request to join a room
-  socket.on('request-join', (roomId, userId, userName) => {
-    // If room doesn't exist, this user becomes the host and joins immediately
-    if (!roomParticipants.has(roomId) || roomParticipants.get(roomId).size === 0) {
+  socket.on('request-join', (roomId, userId, userName, isClaimingHost) => {
+    // If user is explicitly claiming to be the creator
+    if (isClaimingHost) {
       roomHosts.set(roomId, socket.id);
       socket.emit('join-approved', roomId, userId, userName, true); // true = isHost
+
+      // Notify this host about any pending guests that were waiting for them!
+      for (const [waitingSocketId, req] of pendingRequests.entries()) {
+        if (req.roomId === roomId) {
+          io.to(socket.id).emit('join-request-received', {
+            socketId: waitingSocketId,
+            userId: req.userId,
+            userName: req.userName
+          });
+        }
+      }
     } else {
-      // Room exists, someone else is host. Send request to host.
+      // User is a guest.
       const hostSocketId = roomHosts.get(roomId);
       if (hostSocketId) {
         pendingRequests.set(socket.id, { roomId, userId, userName });
@@ -43,10 +54,11 @@ io.on('connection', (socket) => {
           userId,
           userName
         });
-        socket.emit('waiting-for-approval');
+        socket.emit('waiting-for-approval'); // "Waiting for host to admit you"
       } else {
-        // Fallback if host is missing for some reason
-        socket.emit('join-rejected', 'Room host is no longer available.');
+        // Host hasn't joined or created the room connection yet!
+        pendingRequests.set(socket.id, { roomId, userId, userName });
+        socket.emit('waiting-for-host'); // New state: "Waiting for the host to start the meeting"
       }
     }
   });
@@ -134,6 +146,17 @@ io.on('connection', (socket) => {
   socket.on('toggle-media', (payload) => {
     // payload: { roomId, socketId, type: 'video' | 'audio' | 'screen', isEnabled }
     socket.to(payload.roomId).emit('peer-toggled-media', payload);
+  });
+
+  // Reactions and Hands
+  socket.on('send-reaction', (payload) => {
+    // payload: { roomId, socketId, emoji }
+    io.to(payload.roomId).emit('peer-reaction', payload);
+  });
+
+  socket.on('toggle-hand', (payload) => {
+    // payload: { roomId, socketId, isRaised }
+    io.to(payload.roomId).emit('peer-hand-toggled', payload);
   });
 });
 
