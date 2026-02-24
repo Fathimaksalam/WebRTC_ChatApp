@@ -54,7 +54,7 @@ export default function Room() {
         localStream, peers, messages, sendMessage, shareScreen,
         stopScreenShare, toggleAudio, toggleVideo, error, isWaiting,
         isHost, joinRequests, isJoined, respondToJoinRequest,
-        reactions, raisedHands, sendReaction, toggleHand
+        reactions, raisedHands, systemNotifications, sendReaction, toggleHand
     } = useWebRTC(id, userName || "Guest");
 
     useEffect(() => {
@@ -184,6 +184,15 @@ export default function Room() {
                 </div>
             )}
 
+            {/* System Notifications (Join/Leave log) */}
+            <div className={styles.systemNotifications}>
+                {systemNotifications.map(notification => (
+                    <div key={notification.id} className={styles.notificationToast}>
+                        {notification.message}
+                    </div>
+                ))}
+            </div>
+
             {/* Header */}
             <header className={styles.header}>
                 <div className={styles.logoInfo}>
@@ -284,8 +293,9 @@ export default function Room() {
             {/* Controls Bar */}
             <footer className={styles.controlsBar}>
                 <div className={styles.controlsGroup}>
-                    {/* Time or custom subtle UI could go here */}
+                    {/* User profile left section */}
                     {isHost && <span className={styles.hostBadgeNeo}>Host</span>}
+                    <div className={styles.userProfileIcon}>{userName.charAt(0).toUpperCase()}</div>
                     <span className={styles.userNameNeo}>{userName}</span>
                 </div>
 
@@ -339,8 +349,8 @@ export default function Room() {
                         <Hand size={22} />
                     </button>
 
-                    <button className={`btn btn-danger ${styles.leaveBtnNeo}`} onClick={handleLeave}>
-                        <PhoneOff size={20} />
+                    <button className={styles.leaveBtnNeo} onClick={handleLeave} title="Leave Meeting">
+                        <PhoneOff size={22} />
                     </button>
                 </div>
 

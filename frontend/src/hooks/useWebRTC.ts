@@ -39,6 +39,7 @@ export function useWebRTC(roomId: string, userName: string) {
     // Engagement State
     const [reactions, setReactions] = useState<{ id: string, socketId: string, emoji: string }[]>([]);
     const [raisedHands, setRaisedHands] = useState<string[]>([]); // Array of socketIds
+    const [systemNotifications, setSystemNotifications] = useState<{ id: string, message: string }[]>([]);
 
     const socketRef = useRef<Socket | null>(null);
     const peersRef = useRef<{ [socketId: string]: RTCPeerConnection }>({});
@@ -174,7 +175,16 @@ export function useWebRTC(roomId: string, userName: string) {
                     });
                 });
 
+                const addNotification = (message: string) => {
+                    const id = Math.random().toString(36).substring(2, 9);
+                    setSystemNotifications(prev => [...prev, { id, message }]);
+                    setTimeout(() => {
+                        setSystemNotifications(prev => prev.filter(n => n.id !== id));
+                    }, 4000);
+                };
+
                 socketRef.current.on("user-connected", (targetUserId: string, targetSocketId: string, targetUserName: string) => {
+                    addNotification(`${targetUserName} joined the room`);
                     connectToNewUser(targetSocketId, targetUserId, targetUserName, stream);
                 });
 
@@ -257,6 +267,9 @@ export function useWebRTC(roomId: string, userName: string) {
                 });
 
                 socketRef.current.on("user-disconnected", (userId: string, socketId: string) => {
+                    const name = userNamesRef.current[socketId] || "A user";
+                    addNotification(`${name} left the room`);
+
                     if (peersRef.current[socketId]) {
                         peersRef.current[socketId].close();
                         delete peersRef.current[socketId];
@@ -431,6 +444,7 @@ export function useWebRTC(roomId: string, userName: string) {
         respondToJoinRequest,
         reactions,
         raisedHands,
+        systemNotifications,
         sendReaction,
         toggleHand
     };
