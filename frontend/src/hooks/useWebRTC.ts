@@ -86,8 +86,23 @@ export function useWebRTC(roomId: string, userName: string) {
     useEffect(() => {
         let isStopped = false;
 
-        // 1. Get User Media
-        navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+        // 1. Get User Media with Fallback
+        const getMedia = async () => {
+            try {
+                return await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            } catch (err) {
+                console.warn("Could not get video+audio, trying audio only", err);
+                try {
+                    return await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
+                } catch (audioErr) {
+                    console.warn("Could not get audio either, using empty stream", audioErr);
+                    setError("Could not access camera/microphone. You are in viewer mode.");
+                    return new MediaStream();
+                }
+            }
+        };
+
+        getMedia()
             .then((stream) => {
                 if (isStopped) {
                     stream.getTracks().forEach(t => t.stop());
@@ -205,8 +220,8 @@ export function useWebRTC(roomId: string, userName: string) {
                 });
             })
             .catch((err) => {
-                console.error("Error accessing media devices.", err);
-                setError("Error accessing camera/microphone. Please allow permissions.");
+                console.error("Critical error in WebRTC setup:", err);
+                setError("A critical error occurred while setting up the connection.");
             });
 
         return () => {
@@ -291,13 +306,13 @@ export function useWebRTC(roomId: string, userName: string) {
     };
 
     const toggleAudio = (enabled: boolean) => {
-        if (localStream) {
+        if (localStream && localStream.getAudioTracks().length > 0) {
             localStream.getAudioTracks()[0].enabled = enabled;
         }
     };
 
     const toggleVideo = (enabled: boolean) => {
-        if (localStream) {
+        if (localStream && localStream.getVideoTracks().length > 0) {
             localStream.getVideoTracks()[0].enabled = enabled;
         }
     };
